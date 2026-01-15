@@ -27,6 +27,25 @@ static inline int nextPow2(int n) {
     return n;
 }
 
+// CUDA kernels for scan
+__global__ void upsweep(int *data, int two_d, int N) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < N / (2 * two_d)) {
+        int idx = (i + 1) * 2 * two_d - 1;
+        data[idx] += data[idx - two_d];
+    }
+}
+
+__global__ void downsweep(int *data, int two_d, int N) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < N / (2 * two_d)) {
+        int idx = (i + 1) * 2 * two_d - 1;
+        int t = data[idx - two_d];
+        data[idx - two_d] = data[idx];
+        data[idx] += t;
+    }
+}
+
 // exclusive_scan --
 //
 // Implementation of an exclusive scan on global memory array `input`,
@@ -54,6 +73,24 @@ void exclusive_scan(int* input, int N, int* result)
     // to CUDA kernel functions (that you must write) to implement the
     // scan.
 
+    int rounded_N = nextPow2(N);
+
+    // upsweep phase
+    for (int two_d = 1; two_d <= rounded_N / 2; two_d *= 2) {
+        int num_elements = rounded_N / (2 * two_d);
+        int blocks = (num_elements + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+        upsweep<<<blocks, THREADS_PER_BLOCK>>>(result, two_d, rounded_N);
+    }
+
+    // set last element to 0
+    cudaMemset(result + rounded_N - 1, 0, sizeof(int));
+
+    // downsweep phase
+    for (int two_d = rounded_N / 2; two_d >= 1; two_d /= 2) {
+        int num_elements = rounded_N / (2 * two_d);
+        int blocks = (num_elements + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+        downsweep<<<blocks, THREADS_PER_BLOCK>>>(result, two_d, rounded_N);
+    }
 
 }
 
@@ -141,6 +178,23 @@ double cudaScanThrust(int* inarray, int* end, int* resultarray) {
 }
 
 
+// CUDA kernels for find_repeats
+__global__ void set_flags(int *input, int *flags, int length) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < length - 1) {
+        flags[i] = (input[i] == input[i + 1]) ? 1 : 0;
+    } else if (i == length - 1) {
+        flags[i] = 0;
+    }
+}
+
+__global__ void collect_repeats(int *flags, int *output, int length) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < length - 1 && flags[i + 1] > flags[i]) {
+        output[flags[i]] = i;
+    }
+}
+
 // find_repeats --
 //
 // Given an array of integers `device_input`, returns an array of all
@@ -161,7 +215,26 @@ int find_repeats(int* device_input, int length, int* device_output) {
     // must ensure that the results of find_repeats are correct given
     // the actual array length.
 
-    return 0; 
+    int rounded_length = nextPow2(length);
+    int *device_flags;
+    cudaMalloc(&device_flags, rounded_length * sizeof(int));
+
+    // set flags
+    int blocks = (rounded_length + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+    set_flags<<<blocks, THREADS_PER_BLOCK>>>(device_input, device_flags, length);
+
+    // exclusive scan on flags
+    exclusive_scan(device_flags, length, device_flags);
+
+    // collect repeats
+    collect_repeats<<<blocks, THREADS_PER_BLOCK>>>(device_flags, device_output, length);
+
+    // get count
+    int count;
+    cudaMemcpy(&count, device_flags + length - 1, sizeof(int), cudaMemcpyDeviceToHost);
+
+    cudaFree(device_flags);
+    return count; 
 }
 
 

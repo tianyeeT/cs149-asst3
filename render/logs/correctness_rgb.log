@@ -1,0 +1,25 @@
+Rendering to 1024x1024 image
+Loaded scene with 3 circles
+Loaded scene with 3 circles
+---------------------------------------------------------
+Initializing CUDA for CudaRenderer
+Found 1 CUDA devices
+Device 0: NVIDIA GeForce RTX 4060 Laptop GPU
+   SMs:        24
+   Global mem: 8188 MB
+   CUDA Cap:   8.9
+---------------------------------------------------------
+
+Running benchmark, 1 frames, beginning at frame 0 ...
+Dumping frames to logs/output_xxx.ppm
+Copying image data from device
+Wrote image file logs/output_0000.ppm
+Copying image data from device
+***************** Correctness check passed **************************
+Clear:    23.2486 ms
+Advance:  0.0006 ms
+Render:   0.2322 ms
+Total:    23.4813 ms
+File IO:  47.6978 ms
+
+Overall:  0.0827 sec (note units are seconds)
